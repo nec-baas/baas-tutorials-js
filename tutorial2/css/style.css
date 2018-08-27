@@ -1,0 +1,77 @@
+body {
+    background: #eaeaea;
+    width: 550px;
+    margin: 0 auto; /* センタリング */
+    line-height: 1.4em;
+}
+
+#app {
+    margin: 20px 0 40px 0;
+    position: relative;
+    box-shadow: 0 2px 6px 0 rgba(0, 0, 0, 0.2),
+    0 25px 50px 0 rgba(0, 0, 0, 0.15);
+    border-top: 16px solid #8d7d77;
+}
+
+#title {
+    font-size: 70px;
+    font-weight: bold;
+    text-align: center;
+    color: #b3b3b3;
+    text-shadow: -1px -1px rgba(0, 0, 0, 0.2);
+}
+
+#todos {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+#todos li {
+    position: relative;
+    line-height: 43px;
+    font-size: 24px;
+    padding-left: 24px;
+    background: #fff;
+    border-bottom: 1px dotted #ccc;
+}
+
+#new-todo {
+    padding: 16px;
+    border: none;
+    background: rgba(0, 0, 0, 0.02);
+    box-shadow: none;
+}
+
+#todoText {
+    /*background: rgba(0, 0, 0, 0.02);*/
+    background: transparent;
+    color: inherit;
+    /*color: #333;*/
+    width: 80%;
+    border: none;
+    font-size: 24px;
+    line-height: 1.4em;
+}
+
+#addTodo {
+    font-size: 16px;
+    float: right;
+}
+
+.destroy {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+    font-size: 20px;
+    color: #888;
+    content: '✖';
+    background: transparent;
+    border: none;
+}
+
+#logout {
+    width: 80px;
+    height: 28px;
+    font-size: 14px;
+}

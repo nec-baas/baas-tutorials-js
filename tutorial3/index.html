@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>アルバム</title>
+    <script src="js/jquery-1.11.1.min.js"></script>
+    <script src="js/underscore-min.js"></script>
+    <script src="js/baas.js"></script>
+    <script src="js/config.js"></script>
+    <script src="js/application.js"></script>
+    <link rel="stylesheet" href="css/style.css"/>
+</head>
+<body>
+<h1 id="title">アルバム</h1>
+
+<div id="app"></div>
+
+<!-- テンプレート -->
+
+<!-- 画像一覧テーブル -->
+<script type="text/template" id="template_file_table">
+    <table width="100%">
+        <tr>
+            <th width="280px">画像</th>
+            <th>サイズ</th>
+            <th>作成日</th>
+            <th>削除</th>
+        </tr>
+    </table>
+</script>
+
+<!-- 画像行 -->
+<script type="text/template" id="template_file_entry">
+    <tr>
+        <td><span class="show"><%= filename %></span></td>
+        <td><%= size %></td>
+        <td><%= createdAt %></td>
+        <td><a href="#" class="delete">×</a></td>
+    </tr>
+</script>
+
+<!-- ファイルアップロード -->
+<script type="text/template" id="template_file_upload">
+    <p />
+    <input type="file" id="inputFile" /><br />
+    <button type="button" id="uploadButton">アップロード</button>
+
+    <p />
+    <!--<a href="#" id="back">Back</a>-->
+</script>
+</body>
+</html>

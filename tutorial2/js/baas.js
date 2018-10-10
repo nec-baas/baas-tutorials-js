@@ -1,5 +1,5 @@
 /*!
- * NEC Mobile Backend Platform JavaScript SDK version 7.0.2
+ * NEC Mobile Backend Platform JavaScript SDK version 7.5.0
  *
  * Copyright (C) 2014-2018, NEC CORPORATION.
  * All rights reserved.
@@ -44,9 +44,12 @@ var XMLHttpRequest, localStorage;
 
 "use strict";
 var __extends = (this && this.__extends) || (function () {
-    var extendStatics = Object.setPrototypeOf ||
-        ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
-        function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+    var extendStatics = function (d, b) {
+        extendStatics = Object.setPrototypeOf ||
+            ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+            function (d, b) { for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p]; };
+        return extendStatics(d, b);
+    }
     return function (d, b) {
         extendStatics(d, b);
         function __() { this.constructor = d; }
@@ -164,13 +167,15 @@ exports.URL = exports._node_require('url');
 exports.https = exports._node_require('https');
 exports.http = exports._node_require('http');
 exports.tls = exports._node_require('tls');
-var _http2 = null;
+exports.fs = exports._node_require('fs');
+exports.util = exports._node_require('util');
+var __http2 = null;
 try {
-    _http2 = exports._node_require('http2'); 
+    __http2 = exports._node_require('http2'); 
 }
 catch (e) {
 }
-exports.http2 = _http2;
+exports.http2 = __http2;
 exports._hasXhr = function () {
     return typeof XMLHttpRequest !== "undefined";
 };
@@ -180,6 +185,14 @@ var HttpRequestExecutor =  (function () {
         this._resolve = req._resolve;
         this._reject = req._reject;
     }
+    HttpRequestExecutor.closeHttp2Session = function (authority) {
+        if (exports._hasXhr()) {
+            HttpXhr.closeHttp2Session(authority);
+        }
+        else {
+            HttpNode.closeHttp2Session(authority);
+        }
+    };
     HttpRequestExecutor.create = function (req) {
         if (exports._hasXhr()) {
             return this._xhrFactory(req);
@@ -199,6 +212,7 @@ var HttpRequestExecutor =  (function () {
 exports.HttpRequestExecutor = HttpRequestExecutor;
 var HttpRequest =  (function () {
     function HttpRequest(service, path, option) {
+        this._rawMessage = false;
         this._useHttp2 = false;
         exports.nbLogger("HttpRequest#start:path = " + path);
         this._service = service;
@@ -214,6 +228,7 @@ var HttpRequest =  (function () {
         this._data = null;
         this._receiveResponseHeaders = false;
         this._timeout = HttpRequest.getDefaultTimeout();
+        this._useHttp2 = this._service.getHttp2();
         var _currentObj = this._service.getCurrentUser();
         if (_currentObj === null) {
             this._sessionToken = null;
@@ -258,6 +273,16 @@ var HttpRequest =  (function () {
     HttpRequest.getDefaultTimeout = function () {
         return this._defaultTimeout;
     };
+    Object.defineProperty(HttpRequest.prototype, "rawMessage", {
+        get: function () {
+            return this._rawMessage;
+        },
+        set: function (value) {
+            this._rawMessage = value;
+        },
+        enumerable: true,
+        configurable: true
+    });
     Object.defineProperty(HttpRequest.prototype, "useHttp2", {
         get: function () {
             return this._useHttp2;
@@ -314,8 +339,14 @@ var HttpRequest =  (function () {
                 body = JSON.stringify(_this._data);
             }
             var executor = HttpRequestExecutor.create(_this);
-            executor.execute(_this._method, url, _this._headers, body, _this._timeout, _this._responseType, _this._receiveResponseHeaders);
+            if (_this._rawMessage) {
+                executor.setReturnRawMessage(_this._rawMessage);
+            }
+            executor.execute(_this._method, url, _this._headers, body, _this._timeout, _this._responseType, _this._receiveResponseHeaders, _this._useHttp2);
         });
+    };
+    HttpRequest.closeHttp2Session = function (authority) {
+        HttpRequestExecutor.closeHttp2Session(authority);
     };
     HttpRequest.prototype.setMethod = function (method) {
         this._method = method;
@@ -378,7 +409,10 @@ var HttpXhr =  (function (_super) {
         _this._onReadyStateChange = _this._onReadyStateChange.bind(_this);
         return _this;
     }
-    HttpXhr.prototype.execute = function (method, url, headers, body, timeout, responseType, receiveResponseHeaders) {
+    HttpXhr.prototype.setReturnRawMessage = function (rawMessage) {
+        throw new Error("Not supported");
+    };
+    HttpXhr.prototype.execute = function (method, url, headers, body, timeout, responseType, receiveResponseHeaders, useHttp2) {
         var _this = this;
         this._receiveResponseHeaders = receiveResponseHeaders;
         this._xhr = this._createXhr();
@@ -409,6 +443,9 @@ var HttpXhr =  (function (_super) {
             this._xhr.responseType = responseType;
         }
         this._xhr.send(body);
+    };
+    HttpXhr.closeHttp2Session = function (authority) {
+        throw new Error("not support");
     };
     HttpXhr.prototype._createXhr = function () {
         if (!exports._hasXhr()) {
@@ -463,10 +500,14 @@ exports.initHttpNode = function () {
 var HttpNode =  (function (_super) {
     __extends(HttpNode, _super);
     function HttpNode(req) {
-        return _super.call(this, req) || this;
+        var _this = _super.call(this, req) || this;
+        _this._rawMessage = false;
+        return _this;
     }
-    HttpNode.prototype.execute = function (method, urlString, headers, body, timeout, responseType, receiveResponseHeaders) {
-        var _this = this;
+    HttpNode.prototype.setReturnRawMessage = function (returnRawMessage) {
+        this._rawMessage = returnRawMessage;
+    };
+    HttpNode.prototype.execute = function (method, urlString, headers, body, timeout, responseType, receiveResponseHeaders, useHttp2) {
         this._responseType = responseType;
         this._receiveResponseHeaders = receiveResponseHeaders;
         var url;
@@ -478,7 +519,7 @@ var HttpNode =  (function (_super) {
             this._reject(exports._createError(0, "Bad URL: " + urlString, ""));
             return;
         }
-        var isHttps = (url.protocol === 'https:');
+        var isHttps = HttpNode._isHttps(url);
         var options = {
             method: method,
             hostname: url.hostname,
@@ -528,14 +569,83 @@ var HttpNode =  (function (_super) {
                 return;
             }
         }
+        if (exports.http2 != null && useHttp2) {
+            this._sendHttp2Request(url, options, body);
+        }
+        else {
+            this._sendHttpRequest(url, options, body);
+        }
+    };
+    HttpNode.prototype._sendHttp2Request = function (url, options, body) {
+        var authority = url.protocol + '//' + url.hostname;
+        if (url.port != null) {
+            authority += ':' + url.port;
+        }
+        var sessions = HttpNode.getHttp2Sessions();
+        for (var key in sessions) {
+            var session = sessions[key];
+            if (session.destroyed == true || session.closed == true) {
+                exports.nbLogger('http2 session ' + authority + ' is destroyed or closed state');
+                HttpNode.closeHttp2Session(key);
+            }
+        }
+        var http2Session = HttpNode.getHttp2Session(authority);
+        if (http2Session == null) {
+            exports.nbLogger('create http2 session: [' + authority + ']');
+            var http2SessionOptions = {
+                allowHTTP1: true,
+                pfx: options['pfx'],
+                passphrase: options['passphrase'],
+                key: options['key'],
+                cert: options['cert'],
+                ca: options['ca'],
+                rejectUnauthorized: options['rejectUnauthorized']
+            };
+            http2Session = exports.http2.connect(authority, (HttpNode._isHttps(url) ? http2SessionOptions : undefined));
+            HttpNode.setHttp2Session(authority, http2Session);
+        }
+        var outgoingHttpHeaders = options.headers;
+        outgoingHttpHeaders[':method'] = options.method;
+        outgoingHttpHeaders[':path'] = url.path;
+        var http2Stream = http2Session.request(outgoingHttpHeaders);
+        if (options.timeout > 0) {
+            http2Stream.setTimeout(options.timeout, function () {
+                HttpNode._closeStream(http2Stream);
+                var error = exports._createError(0, "HTTP/2 Request timeout: " + options.timeout + "[msec]", "");
+                exports.nbError("Timeout detected: " + error);
+            });
+        }
+        if (this._rawMessage) {
+            this._resolve(http2Stream); 
+        }
+        else {
+            this._setHttp2ResponseHandlers(http2Stream);
+        }
+        if (body != null) {
+            if (typeof body === "string" || body instanceof String || body instanceof Buffer) {
+                http2Stream.write(body);
+            }
+            else {
+                http2Stream.write(JSON.stringify(body));
+            }
+        }
+        http2Stream.end();
+    };
+    HttpNode.prototype._sendHttpRequest = function (url, options, body) {
+        var _this = this;
         var handler = function (res) {
-            var status = res.statusCode;
-            _this._req.responseHeaders = res.headers;
-            _this._setResponseHandlers(status, res);
+            if (_this._rawMessage) {
+                _this._resolve(res);
+            }
+            else {
+                var status_1 = res.statusCode;
+                _this._req.responseHeaders = res.headers;
+                _this._setResponseHandlers(status_1, res);
+            }
         };
-        var req = isHttps ? exports.https.request(options, handler) : exports.http.request(options, handler);
-        if (timeout > 0) {
-            req.setTimeout(timeout, function () { return req.abort(); });
+        var req = HttpNode._isHttps(url) ? exports.https.request(options, handler) : exports.http.request(options, handler);
+        if (options.timeout > 0) {
+            req.setTimeout(options.timeout, function () { return req.abort(); });
         }
         req.on('error', function (e) {
             var error = exports._createError(0, "HTTP request error", e.toString());
@@ -551,6 +661,9 @@ var HttpNode =  (function (_super) {
             }
         }
         req.end();
+    };
+    HttpNode._isHttps = function (url) {
+        return (url.protocol === 'https:');
     };
     HttpNode.prototype._setResponseHandlers = function (status, res) {
         var _this = this;
@@ -586,6 +699,54 @@ var HttpNode =  (function (_super) {
             _this._reject(error);
         });
     };
+    HttpNode.prototype._setHttp2ResponseHandlers = function (stream) {
+        var _this = this;
+        var chunks = [];
+        var resHeaders = {};
+        var statusCode = 0;
+        stream.on('response', function (headers, flags) {
+            resHeaders = headers;
+            statusCode = Number(headers[exports.http2.constants.HTTP2_HEADER_STATUS]);
+        }).on('data', function (data) {
+            chunks.push(data);
+        }).on('end', function () {
+            var buffer = Buffer.concat(chunks);
+            var responseBody = _this._parseNodeResponse(buffer);
+            HttpNode._closeStream(stream);
+            if (200 <= statusCode && statusCode < 300) {
+                if (_this._receiveResponseHeaders) {
+                    _this._resolve({
+                        body: responseBody,
+                        headers: resHeaders,
+                        status: statusCode
+                    });
+                }
+                else {
+                    _this._resolve(responseBody);
+                }
+            }
+            else {
+                var statusMessage = (statusCode == 0) ? "Unable to get proper response" : "";
+                var responseText = (_this._responseType !== "buffer" && responseBody != null) ? responseBody.toString() : "";
+                var error = exports._createError(statusCode, statusMessage, responseText, responseBody);
+                exports.nbError("HTTP/2 Response Error: status=" + statusCode);
+                _this._reject(error);
+            }
+        }).on('error', function (e) {
+            HttpNode._closeStream(stream);
+            var error = exports._createError(0, "HTTP/2 Stream Error", e.toString());
+            exports.nbError("HTTP/2 Stream Error: " + e.toString());
+            _this._reject(error);
+        }).on('push', function (headers, flags) {
+            exports.nbLogger('HTTP/2 Stream push');
+        }).on('finish', function () {
+            exports.nbLogger('HTTP/2 Stream finish');
+        }).on('altsvc', function (alt, origin, streamId) {
+            exports.nbLogger('HTTP/2 Stream altsvc');
+        }).on('aborted', function () {
+            exports.nbLogger('HTTP/2 Stream aborted');
+        });
+    };
     HttpNode.prototype._parseNodeResponse = function (buffer) {
         try {
             switch (this._responseType) {
@@ -609,6 +770,64 @@ var HttpNode =  (function (_super) {
             return null;
         }
     };
+    HttpNode._closeSession = function (session, callback) {
+        if ('close' in session) {
+            session.close(callback); 
+        }
+        else if ('shutdown' in session) {
+            var options = { 'graceful': true };
+            session.shutdown(options, callback); 
+        }
+        else {
+            session.destroy();
+            session.removeAllListeners();
+        }
+    };
+    HttpNode._closeStream = function (stream) {
+        if ('close' in stream) {
+            stream.close(); 
+        }
+        else {
+            stream.destroy(); 
+        }
+    };
+    HttpNode.getHttp2Sessions = function () {
+        return HttpNode._http2Sessions;
+    };
+    HttpNode.getHttp2Session = function (authority) {
+        var session = null;
+        if (authority in HttpNode._http2Sessions) {
+            session = HttpNode._http2Sessions[authority];
+        }
+        return session;
+    };
+    HttpNode.setHttp2Session = function (authority, session) {
+        HttpNode._http2Sessions[authority] = session;
+    };
+    HttpNode.closeHttp2Session = function (authority) {
+        if (authority === undefined) {
+            for (var key in HttpNode._http2Sessions) {
+                HttpNode.closeHttp2Session(key);
+            }
+            return;
+        }
+        var session = HttpNode._http2Sessions[authority];
+        if (session != null) {
+            if (session.destroyed) {
+                session.removeAllListeners();
+                exports.nbLogger('HTTP/2 session [' + authority + '] is already destroyed');
+            }
+            else {
+                exports.nbLogger('HTTP/2 session [' + authority + '] is going to close');
+                HttpNode._closeSession(session, function () {
+                    session.removeAllListeners();
+                    exports.nbLogger('HTTP/2 session [' + authority + '] has been closed');
+                });
+            }
+            delete HttpNode._http2Sessions[authority];
+        }
+    };
+    HttpNode._http2Sessions = {};
     return HttpNode;
 }(HttpRequestExecutor));
 exports.HttpNode = HttpNode;
@@ -679,12 +898,12 @@ var _SdeRequest =  (function () {
                 var callbacks = _SdeRequest._callbacks[requestId];
                 exports.nbLogger("  requestId=" + requestId);
                 exports.nbLogger("  _callbacks[requestId]=" + callbacks);
-                var status_1 = params.status;
-                if (!status_1) {
+                var status_2 = params.status;
+                if (!status_2) {
                     exports.nbLogger("_SdeRequest.sdeCallback(), warning:: not found status property");
-                    status_1 = 0;
+                    status_2 = 0;
                 }
-                if (status_1 >= 200 && status_1 < 300) {
+                if (status_2 >= 200 && status_2 < 300) {
                     exports.nbLogger("_SdeRequest.sdeCallback(), call success callback");
                     callbacks.success(JSON.stringify(params.response));
                 }
@@ -1365,7 +1584,7 @@ var ObjectQuery =  (function () {
         }
         var sort = queryJson["sort"];
         if (sort != null) {
-            for (var _i = 0, _a = Object.keys(sort); _i < _a.length; _i++) {
+            for (var _i = 0, _a = Object.keys(sort); _i < _a.length; _i++) { 
                 var sortKey = _a[_i];
                 query.setSortOrder(sortKey, sort[sortKey]);
             }
@@ -2274,6 +2493,7 @@ var User =  (function () {
 }());
 exports.User = User;
 exports.declareUser = function (_service) {
+    var _a;
     _service.User = (_a =  (function (_super) {
             __extends(_User, _super);
             function _User() {
@@ -2318,7 +2538,6 @@ exports.declareUser = function (_service) {
         }(User)),
         _a.delete = _a.remove,
         _a);
-    var _a;
 };
 var Group =  (function () {
     function Group(groupname, service) {
@@ -2720,6 +2939,7 @@ var Group =  (function () {
 }());
 exports.Group = Group;
 exports.declareGroup = function (_service) {
+    var _a;
     _service.Group = (_a =  (function (_super) {
             __extends(_Group, _super);
             function _Group(groupname) {
@@ -2737,7 +2957,6 @@ exports.declareGroup = function (_service) {
         }(Group)),
         _a.delete = _a.remove,
         _a);
-    var _a;
 };
 var FileMetadata =  (function () {
     function FileMetadata() {
@@ -3307,7 +3526,7 @@ var ObjectBucket =  (function (_super) {
     };
     ObjectBucket.prototype.remove = function (objectId, callbacks, etag) {
         exports.nbLogger("ObjectBucket.delete)");
-        if (objectId == null) {
+        if (!objectId) {
             exports.nbError("ObjectBucket.remove(), Parameter is invalid");
             throw new Error("No objectId");
         }
@@ -3853,6 +4072,7 @@ var ObjectBucket =  (function (_super) {
 }(BaseBucket));
 exports.ObjectBucket = ObjectBucket;
 exports.declareObjectBucket = function (_service) {
+    var _a;
     _service.ObjectBucket = (_a =  (function (_super) {
             __extends(_ObjectBucket, _super);
             function _ObjectBucket(name, mode) {
@@ -3875,7 +4095,6 @@ exports.declareObjectBucket = function (_service) {
         }(ObjectBucket)),
         _a.useLongQuery = false,
         _a);
-    var _a;
 };
 var FileBucket =  (function (_super) {
     __extends(FileBucket, _super);
@@ -3999,33 +4218,95 @@ var FileBucket =  (function (_super) {
         return this._save(fileName, data, null, true, callbacks);
     };
     FileBucket.prototype.load = function (fileName, callbacks) {
-        exports.nbLogger("FileBucket.load()");
+        return this._load(fileName, undefined, callbacks);
+    };
+    FileBucket.prototype.loadWithOptions = function (fileName, options, callbacks) {
+        return this._load(fileName, options, callbacks);
+    };
+    FileBucket.prototype._load = function (fileName, options, callbacks) {
+        exports.nbLogger("FileBucket._load()");
         if (!(typeof fileName !== "undefined" && fileName !== null)) {
-            exports.nbLogger("FileBucket.load(), Parameter is invalid : fileName");
+            exports.nbLogger("FileBucket._load(), Parameter is invalid : fileName");
             throw new Error("No fileName");
         }
-        if (!(typeof Blob !== "undefined" && Blob !== null) && !(typeof Buffer !== "undefined" && Buffer !== null)) {
-            exports.nbLogger("FileBucket.load(), Not supported Blob nor Buffer");
-            throw new Error("No Blob/Buffer support");
+        var rawRequest = false;
+        if (typeof options !== "undefined") {
+            if (options === null || typeof options !== "object") {
+                exports.nbLogger("FileBucket._load(), Invalid options: " + options);
+                throw new Error("Invalid options: " + options);
+            }
+            if (options["rawRequest"] === true) {
+                if (!(typeof Blob !== "undefined" && Blob !== null) && !(typeof Buffer !== "undefined" && Buffer !== null)) {
+                    exports.nbLogger("FileBucket._load(), Not supported Blob nor Buffer");
+                    throw new Error("No Blob/Buffer support");
+                }
+                rawRequest = true;
+            }
         }
         var path = this.getDataPath("/" + encodeURIComponent(fileName));
-        exports.nbLogger("FileBucket.load(), path=" + path);
+        exports.nbLogger("FileBucket._load(), path=" + path);
         var req = new HttpRequest(this._service, path);
         req.setMethod("GET");
-        if (typeof Blob !== "undefined" && Blob !== null) {
-            req.setResponseType("blob");
+        if (rawRequest) {
+            req.rawMessage = true;
         }
-        else if (typeof Buffer !== "undefined" && Buffer !== null) {
-            req.setResponseType("buffer");
+        else {
+            if (typeof Blob !== "undefined" && Blob !== null) {
+                req.setResponseType("blob");
+            }
+            else if (typeof Buffer !== "undefined" && Buffer !== null) {
+                req.setResponseType("buffer");
+            }
+        }
+        if (typeof options !== "undefined") {
+            var receiveResponse = options["extraResponse"];
+            if (receiveResponse === true) {
+                req.setReceiveResponseHeaders(true);
+            }
+            var start = options["rangeStart"];
+            var end = options["rangeEnd"];
+            var range = FileBucket._createRangeValue(start, end);
+            if (range !== undefined) {
+                req.addRequestHeader("Range", "bytes=" + range);
+            }
+            var ifMatch = options["ifMatch"];
+            if (typeof ifMatch !== "undefined") {
+                req.addRequestHeader("If-Match", '"' + ifMatch + '"');
+            }
+            var ifRange = options["ifRange"];
+            if (typeof ifRange !== "undefined") {
+                req.addRequestHeader("If-Range", '"' + ifRange + '"');
+            }
         }
         var promise = req.execute().then(function (response) {
             return response;
         }, function (err) {
-            exports.nbLogger(("FileBucket.load(), error: " + (exports._errorText(err))));
+            exports.nbLogger(("FileBucket._load(), error: " + (exports._errorText(err))));
             err.data = fileName;
             return Promise.reject(err);
         });
         return exports._promisify(promise, callbacks);
+    };
+    FileBucket._createRangeValue = function (start, end) {
+        if (start !== undefined && (!Number.isInteger(start) || start < 0)) {
+            throw new Error("invalid rangeStart value: " + start);
+        }
+        if (end !== undefined && (!Number.isInteger(end) || end < 0)) {
+            throw new Error("invalid rangeEnd value: " + end);
+        }
+        var range = undefined;
+        if (start === undefined && end === undefined) {
+        }
+        else if (start !== undefined && end === undefined) {
+            range = start + "-";
+        }
+        else if (start === undefined && end !== undefined) {
+            range = "-" + end;
+        }
+        else {
+            range = start + "-" + end;
+        }
+        return range;
     };
     FileBucket.prototype.remove = function (fileName, callbacks) {
         exports.nbLogger("FileBucket.delete()");
@@ -4540,6 +4821,12 @@ var CustomApi =  (function () {
         return this;
     };
     CustomApi.prototype.execute = function (data, callbacks) {
+        return this._execute(data, false, callbacks);
+    };
+    CustomApi.prototype.executeRaw = function (data) {
+        return this._execute(data, true);
+    };
+    CustomApi.prototype._execute = function (data, rawMessage, callbacks) {
         var request = new HttpRequest(this._service, this.path);
         request.setMethod(this.method);
         request.addQueryParams(this.queryParams);
@@ -4551,8 +4838,13 @@ var CustomApi =  (function () {
                 request.setData(data);
             }
         }
-        if (this.responseType != null) {
-            request.setResponseType(this.responseType);
+        if (!rawMessage) {
+            if (this.responseType != null) {
+                request.setResponseType(this.responseType);
+            }
+        }
+        else {
+            request.rawMessage = true;
         }
         if (this.contentType != null) {
             request.setContentType(this.contentType);
@@ -4934,6 +5226,7 @@ var NebulaConfig =  (function () {
         this.offline = false;
         this.allowSelfSignedCert = false;
         this.debugMode = "release";
+        this.enableHttp2 = false;
         this.tenant = params.tenant;
         this.appId = params.appId;
         this.appKey = params.appKey;
@@ -4960,6 +5253,9 @@ var NebulaConfig =  (function () {
         }
         if (params.debugMode !== undefined) {
             this.debugMode = params.debugMode;
+        }
+        if (params.enableHttp2 !== undefined) {
+            this.enableHttp2 = params.enableHttp2;
         }
     }
     return NebulaConfig;
@@ -5126,6 +5422,12 @@ var NebulaService =  (function () {
             return this.getTenantID() + "_" + this.getAppID();
         }
     };
+    NebulaService.prototype.getHttp2 = function () {
+        return this._config.enableHttp2;
+    };
+    NebulaService.prototype.setHttp2 = function (enable) {
+        this._config.enableHttp2 = enable;
+    };
     NebulaService.prototype.initialize = function (params) {
         var _this = this;
         this._config = new NebulaConfig(params);
@@ -5148,7 +5450,8 @@ var NebulaService =  (function () {
                     baseUri: this.getBaseUri(),
                     offline: this.isOffline(),
                     allowSelfSignedCert: this.isAllowSelfSignedCert(),
-                    debugMode: this.getDebugMode()
+                    debugMode: this.getDebugMode(),
+                    enableHttp2: this.getHttp2()
                 };
                 request.setData(initializeParams);
                 request.execute().then(function (response) {
